@@ -528,7 +528,7 @@ wrangling_tcm_folhadepesssoal_html()
 Disponibilizar os dados:
 8 - API disponibilizar os dados via consulta GET;
 
-```{r}
+```{r 8, eval=FALSE}
 
 #Ainda não desenvolvido
 
@@ -537,7 +537,7 @@ Disponibilizar os dados:
 
 9 - Exportar dados para o Banco de Dados do CKAN;
 
-```{r}
+```{r 9, eval=FALSE}
 
 #Ainda não desenvolvido
 
@@ -545,8 +545,8 @@ Disponibilizar os dados:
 
 
 Automatizar a execução do Scraping:
-10 - Timer para disparar o Web Scraping em diárias e horários determinados;
-```{r}
+10 - Timer para disparar o Web Scraping em dias e horários determinados;
+```{r 10, eval=FALSE}
 
 #Ainda não desenvolvido
 
