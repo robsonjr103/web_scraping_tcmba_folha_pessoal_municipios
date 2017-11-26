@@ -1,0 +1,584 @@
+---
+title: "Web Scraping - Folha de Pessoal dos Municípios da Bahia via TCM-Ba"
+author: "George Santiago"
+date: "25 de novembro de 2017"
+output: html_document
+---
+
+# Sobre a proposta e objetivo do Web Scraping
+
+O presente Web Scraping tem o objetivo de obter os dados da Folha de Pessoal dos Municípios da Bahia, por meio do site do Tribunal de Contas dos Municípios do Estado da Bahia (TCM-Ba), visto que os dados ainda não são disponibilizados no formato de Dados Abertos, conforme impõe a Lei de Acesso à Informação (art. 8º, §3°, III, da LAI). Em vista disso, foi necessário produzir um Web Scraping para obter os dados disponibilizados no site do TCM-Ba em formato HTML (Ver [link do TCM-Ba](http://www.tcm.ba.gov.br/portal-da-cidadania/pessoal/)) de forma sistêmica e automatizada, reduzindo significativamente o tempo que se levaria para obter os dados caso as consultas fossem feitas manualmente.
+
+
+## Sobre o Código do Web Scraping em Linguagem R
+
+O código do *Web Scraping - Folha de Pessoal dos Municípios da Bahia via TCM-Ba* apesar de estar operacional, ainda faltam implementações (as quais serão mais detalhadas abaixo), bem como aperfeiçoar os códigos inicialmente utilizados; transferir as estratégias de armazenamento inicialmente adotadas (arquivos CSV) para um Sistema de Gestão de Banco de Dados (SGBD), a exemplo do SQLite; adotar estratégias mais eficientes na fase de tratamento de dados (Data Wrangling), tornando essa etapa mais rápida; e implantar um sistema de tratamento de erros durante a execução do Web Scraping.
+
+O código foi desenvolvido para ambiente **Windows 10**, com a versão *3.4.2* do R, mas futuramente será implementado para **Linux** também.
+
+
+## Etapas e Estratégias do Web Scraping
+
+Para realizar com sucesso o presente Web Scraping, foi preciso mapear as etapas que serão pecorridas pelo Web Scraping, as quais podem ser sintetizadas da seguinte forma:
+
+1° - Realizar uma requisição POST no [link do TCM-Ba](http://www.tcm.ba.gov.br/portal-da-cidadania/pessoal/) por meio da qual é possível consultar manualmente a folha de pessoal dos municípios do Estado da Bahia;
+2° - Após realizada a requisição POST com os dados do Município, Entidade e Ano, procedemos a coleta dos dados da tabela que contém os dados da Folha de Pessoal, na qual são registradas informações sobre Nome do Servidor Público; N° matrícula; Tipo Servidor; Cargo; Salário Base; Salário Vantagens e Salário Gratificação. Ainda nessa etapa, precisamos incluir algumas informações adicionais para faciliar o armanezamento e futura análise dos dados, a exemplo das seguintes colunas: Ano, Mês, Código do Município, Nome do Município, Código da Entidade e Nome da Entidade.
+3º - Obtido os dados, realizamos o seu tratamento, com o objetivo de auxiliar as futuras análises dos dados. Nessa fase, todas as letras foram transformadas em maiúsculas e retirado a acentuação das palavras.
+
+Como estratégia na obtenção dos dados, optamos por armazenar os arquivos HTML das requisições, com vista a poder reproduzir a etapa de tratamento e limpeza dos dados, caso fosse necessário, visto o número de requisições que seriam realizas (cerca de 30.000).
+
+## Estrutura do Código em Linguagem R do Web Scraping
+
+O presente código foi dividido inicialmente no que poderíamos classificar em 10 estruturas:
+
+Configuração:
+1 - Carregar os pacotes e a pasta de trabalho (diretório);
+
+Pré-Scraping Principal:
+2 - Criar a Tabela com dimensão Calendário;
+3 - Obter o Código e Nome dos Municípios no site do TCM-Ba e Criar uma Tabela com esses dados;
+4 - Obter o Código e Nome das Entidades Municipais (Prefeitura, Câmara de Vereadores...) no Web Service do TCM-Ba e, por fim, consolidar todos os dados (código e nomes) dos Municípios e Entidades Municipais em uma só Tabela
+5 - Gerar uma Tabela de Requisições para relizar as consultar no site do TCM-Ba via método POST;
+
+Scraping:
+6 - Scraping dos Dados de cada entidade municipal em determinado ano e mês;
+
+Tratamento dos Dados:
+7 - Data Wrangling (tratamento) dos dados obtidos via Web Scraping do site do TCM-Ba;
+
+Disponibilizar os dados:
+8 - API disponibilizar os dados via consulta GET;
+9 - Exportar dados para o Banco de Dados do CKAN;
+
+Automatizar a execução do Scraping:
+10 - Timer para disparar o Web Scraping em diárias e horários determinados;
+
+### Código do Web Scraping em Linguagem R 
+
+Configuração:
+1.1 - Carregar os pacotes utilizados no script
+
+Nessa etapa, iremos carregar os pacotes utilizadas em todo o Web Scraping, bem como definir o diretório de trabalho, que é de fundamental importância na etapa de criação das pastas para armazenamento dos dados obtidos. Se os pacotes não estivem instalados na máquina, será necessário utilizar o comando *install.packages("nome_do_pacote")* para que consiga ser carregado com na função *library()*
+
+```{r setup,  eval=FALSE,}
+
+# Carregar pacotes utilizados no Web Scraping
+library(httr)
+library(curl)
+library(rvest)
+library(xml2)
+library(dplyr)
+library(data.table)
+library(readr)
+library(purrr)
+library(stringr)
+library(tidyr)
+library(tidyverse)
+library(tibble)
+library(magrittr)
+library(abjutils)
+library(janitor)
+library(stringr)
+library(lubridate)
+library(plumber)
+
+```
+
+
+1.2 - Criar o conjunto de pasta de trabalho (diretório)
+
+```{r pastas,  eval=FALSE,}
+
+#Modelo de criação de pastas para sistema Windows
+
+dir_principal <- getwd()
+subdir_principal <- file.path(dir_principal, "TCM_Municipios_FolhaPesssoal")
+
+subdir_parametros <- file.path(subdir_principal, "parametros_scraping")
+subdir_resposta_scraping_html <- file.path(subdir_principal, "resposta_scraping_html")
+subdir_arquivos_tratados_csv <- file.path(subdir_principal, "arquivos_tratados_csv")
+  
+
+if (dir.exists(dir_principal) == FALSE) {
+  dir.create(dir_principal)}
+
+if (dir.exists(subdir_principal) == FALSE) {
+  dir.create(subdir_principal)}
+
+if (dir.exists(subdir_parametros) == FALSE) {
+  dir.create(subdir_parametros)}
+
+if (dir.exists(subdir_resposta_scraping_html) == FALSE) {
+  dir.create(subdir_resposta_scraping_html)}
+
+if (dir.exists(subdir_arquivos_tratados_csv) == FALSE) {
+  dir.create(subdir_arquivos_tratados_csv )}
+
+print(paste("As pastas foram criadas com sucesso no diretório", subdir_principal))
+      
+```
+
+
+Pré-Scraping Principal:
+
+2 - Criar a Tabela com dimensão Calendário;
+```{r tabela_dcalendario, eval=FALSE, message=TRUE, warning=FALSE}
+
+# Criar a função que gera a tabela com a relação de meses e ano para o Web Scraping.
+carregar_tcm_calendario <- function() {
+        
+tabela_tcm_dCalendario <- data_frame(data = seq(ymd("2015-01-01"), (today() - day(today()) + 1 - months(1)),
+                                                 by = "month"),
+                                      ano = year(data),
+                                      mes = month(data)) %>%
+                           readr::write_csv(file.path(subdir_parametros, "tabela_tcm_dCalendario.csv"))
+}
+
+#Executa a função criada
+carregar_tcm_calendario ()
+
+```
+
+
+3 - Obter o Código e Nome dos Municípios no site do TCM-Ba e Criar uma Tabela com esses dados;
+
+```{r scraping_tcm_municipios_html, eval=FALSE}
+
+#Cria a função para obter os dados do site do TCM-Ba
+carregar_scraping_tcm_municipios_html <- function(){
+
+        url_tcm <- "http://www.tcm.ba.gov.br/portal-da-cidadania/pessoal/"
+        #!!!Implementar configuração para testar conexão
+        #Se não tiver conexão, retornar pint com "Não foi identificado conexão com a internet" e
+        #tentar novamente depois de 5 minutos.
+        list_tcm_municipios <- httr::GET(url_tcm) %>% 
+                               xml2::read_html() %>% 
+                               rvest::html_nodes("#municipios > option") 
+
+        cod_municipio <- list_tcm_municipios %>% 
+                         rvest::html_attr("value")
+        
+        nm_municipio <- list_tcm_municipios %>% 
+                        rvest::html_text() %>% 
+                        stringr::str_trim()
+        
+        tabela_tcm_dMunicipios <- tibble::tibble(cod_municipio = cod_municipio,
+                                                 nm_municipio = nm_municipio) %>%
+                                  dplyr::filter(cod_municipio != "") %>%
+                                  readr::write_csv(file.path(subdir_parametros,"tabela_tcm_dMunicipios.csv"))
+                                  #!!!Problema no encoding para identificar IAÇU, por causa do "Ç". Todavia,
+                                  #está tudo "ok" com as requisições 
+}
+
+#Executa a função criada acima
+carregar_scraping_tcm_municipios_html()
+
+
+```
+
+
+4 - Obter o Código e Nome das Entidades Municipais (Prefeitura, Câmara de Vereadores...) no Web Service do TCM-Ba e, por fim, consolidar todos os dados (código e nomes) dos Municípios e Entidades Municipais em uma só Tabela
+
+```{r scraping_tcm_entidades_ws, eval=FALSE}
+
+#Cria a função para obter os dados via Web Service
+carregar_scraping_tcm_entidades_ws <- function(){
+    url_tcm_entidades_ws <- "http://www.tcm.ba.gov.br/Webservice/public/index.php/despesas/entidade?muni="
+    
+    if (file.exists(file.path(subdir_parametros, "tabela_tcm_dMunicipios.csv")) == FALSE) { carregar_scraping_tcm_municipios_html() }
+    
+    tabela_tcm_dMunicipios <- readr::read_csv(file.path(subdir_parametros, "tabela_tcm_dMunicipios.csv"))
+
+    nrow <- nrow(tabela_tcm_dMunicipios)
+    
+    scraping_tcm_entidades <- for(i in 1:nrow){
+                                  
+                                query <- tabela_tcm_dMunicipios[i, ]
+                                #!!!Criar rotina para identificar erro de conexão de internet 
+                                paste0(url_tcm_entidades_ws, query$cod_municipio) %>%
+                                httr::GET() %>%
+                                #!!!Implantar funcionalidade para tratar possíveis erros de requisição
+                                httr::content() %>%
+                                purrr::map_dfr(tibble::as_tibble) %>%
+                                dplyr::mutate(cod_municipio = query$cod_municipio, nm_municipio = query$nm_municipio) %>%
+                                magrittr::set_names(c("nm_entidade", "cod_entidade",
+                                                      "cod_municipio","nm_municipio")) %>%
+                                readr::write_csv(file.path(subdir_parametros, "resposta_tcm_dMunicipios_e_Entidades.csv"), append = TRUE)
+
+    progresso <- paste("Scraping -", i, "de", nrow, "linhas", "-", round((i/nrow)*100),"%") %>%
+                 print()
+                                  
+}
+    
+    wrangling_tcm_entidades  <-  readr::read_csv(file.path(subdir_parametros, "resposta_tcm_dMunicipios_e_Entidades.csv"), col_names = FALSE) %>%
+                                 purrr::map_dfr(stringr::str_to_upper) %>%
+                                 janitor::clean_names() %>%
+                                 magrittr::set_names(c("nm_entidade", "cod_entidade",
+                                                       "cod_municipio","nm_municipio")) %>%
+                                 dplyr::select(cod_municipio, nm_municipio, cod_entidade, nm_entidade)  %>%
+                                 readr::write_csv(file.path(subdir_parametros, "tabela_tcm_dMunicipios_e_Entidades.csv"))
+}
+
+#Executa a função criada acima
+carregar_scraping_tcm_entidades_ws()   
+
+```
+
+
+5 - Gerar uma Tabela de Requisições para relizar as consultar no site do TCM-Ba via método POST;
+
+```{r tabela_requisicoes, eval=FALSE}
+
+
+
+#Cria a função gera a Tabela de Requisições
+carregar_tabela_requisicoes <- function(){
+      
+  carregar_tcm_calendario()
+  
+  if (file.exists(file.path(subdir_parametros, "tabela_tcm_dMunicipios.csv")) == FALSE) { carregar_scraping_tcm_municipios_html() }
+  if (file.exists(file.path(subdir_parametros, "tabela_tcm_dMunicipios_e_Entidades.csv")) == FALSE) { carregar_scraping_tcm_entidades_ws() }
+  
+  if (file.exists(file.path(subdir_parametros, "tabela_requisicoes.csv")) == FALSE) {
+  
+ 
+      calendario <- readr::read_csv(file.path(subdir_parametros, "tabela_tcm_dCalendario.csv"))
+      
+      muni_ent <- readr::read_csv(file.path(subdir_parametros, "tabela_tcm_dMunicipios_e_Entidades.csv"))
+
+      nrow <- nrow(calendario)
+      
+      loop <- for (i in 1:nrow) {
+        
+        r_calendario <- calendario[i, ]
+  
+        tabela_requisicoes <- tibble::tibble(data = r_calendario$data,
+                                             ano = r_calendario$ano,
+                                             mes = r_calendario$mes,
+                                             cod_municipio = muni_ent$cod_municipio,
+                                             nm_municipio = muni_ent$nm_municipio,
+                                             cod_entidade = muni_ent$cod_entidade,
+                                             nm_entidade = muni_ent$nm_entidade,
+                                             situacao = "",
+                                             nome_arquivo_resposta = "",
+                                             tratado = "",
+                                             nome_arquivo_tratado = "") %>%
+                                             readr::write_delim(file.path(subdir_parametros, "tabela_requisicoes.csv"), delim = ";", append = TRUE)
+}
+
+
+      tabela_col_names <- readr::read_delim(file.path(subdir_parametros, "tabela_requisicoes.csv"), delim = ";", col_names = FALSE) %>%
+        rowid_to_column() %>% 
+        magrittr::set_names(c("id",
+                              "data",
+                              "ano",
+                              "mes",
+                              "cod_municipio",
+                              "nm_municipio",
+                              "cod_entidade",
+                              "nm_entidade",
+                              "situacao",
+                              "nome_arquivo_resposta",
+                              "tratado",
+                              "nome_arquivo_tratado")) %>%
+        readr::write_delim(file.path(subdir_parametros, "tabela_requisicoes.csv"), delim = ";")
+
+      
+} else {
+ 
+        requisicoes_velhas <- readr::read_delim(file.path(subdir_parametros, "tabela_requisicoes.csv"), delim = ";", col_names = FALSE)
+        
+      loop_update <- for (i in 1:nrow) {
+        
+        r_calendario <- calendario[i, ]
+      
+        requisicoes_novas_loop <- tibble::tibble(data = r_calendario$data,
+                                            ano = r_calendario$ano,
+                                            mes = r_calendario$mes,
+                                            cod_municipio = muni_ent$cod_municipio,
+                                            nm_municipio = muni_ent$nm_municipio,
+                                            cod_entidade = muni_ent$cod_entidade,
+                                            nm_entidade = muni_ent$nm_entidade,
+                                            situacao = "",
+                                            nome_arquivo_resposta = "",
+                                            tratado = "",
+                                            nome_arquivo_tratado = "") %>% 
+                              readr::write_delim(file.path(subdir_parametros, "tabela_requisicoes_novas.csv"), delim = ";", append = TRUE)
+
+  }
+      tabela_news <- readr::read_delim(file.path(subdir_parametros, "tabela_requisicoes_novas.csv"), delim = ";", col_names = FALSE) %>%
+        rowid_to_column() %>% 
+        magrittr::set_names(c("id",
+                              "data",
+                              "ano",
+                              "mes",
+                              "cod_municipio",
+                              "nm_municipio",
+                              "cod_entidade",
+                              "nm_entidade",
+                              "situacao",
+                              "nome_arquivo_resposta",
+                              "tratado",
+                              "nome_arquivo_tratado"))
+      
+      requisicoes_velhas <- readr::read_delim(file.path(subdir_parametros, "tabela_requisicoes.csv"), delim = ";", col_names = TRUE)
+      
+      ultima_linha <- nrow(requisicoes_velhas)
+      
+      add_linhas <- tabela_news %>%
+                    dplyr::filter(id > ultima_linha)
+
+      requisicoes_atualizadas <- dplyr::full_join(requisicoes_velhas, add_linhas) %>%
+                                 readr::write_delim(file.path(subdir_parametros, "tabela_requisicoes.csv"), delim = ";")
+
+      file.remove(file.path(subdir_parametros, "tabela_requisicoes_novas.csv"))
+}
+
+}
+
+#Executa a função criada acima
+carregar_tabela_requisicoes ()
+
+```
+
+Scraping:
+6 - Scraping dos Dados de cada entidade municipal em determinado ano e mês;
+
+```{r scraping_tcm_folhadepesssoal_html, eval=FALSE}
+
+iniciar_scraping_tcm_folhadepesssoal_html <- function() { 
+  
+url_tcm <- "http://www.tcm.ba.gov.br/portal-da-cidadania/pessoal/"
+
+if (file.exists(file.path(subdir_parametros, "tabela_requisicoes.csv")) == FALSE) { carregar_tabela_requisicoes ()
+  
+} else {
+
+
+tabela_requisicoes <- readr::read_delim(file.path(subdir_parametros, "tabela_requisicoes.csv"), delim = ";") %>%
+                      dplyr::filter(is.na(situacao) | situacao == "erro" | situacao == "nao informado")
+
+tabela_gravar_requisicoes <- readr::read_delim(file.path(subdir_parametros, "tabela_requisicoes.csv"), delim = ";")
+    
+    i <- tabela_requisicoes$id
+
+    nrow <- nrow(tabela_requisicoes)
+
+    requisicoes_POST <- for(i in 1:nrow) {
+              
+                            query <- tabela_requisicoes[i, ]
+
+                            parametros <- list(municipios = query$cod_municipio,
+                                               txtEntidade = query$nm_entidade,
+                                               entidades = query$cod_entidade,
+                                               ano = query$ano,
+                                               mes = query$mes,
+                                               tipoRegime = "",
+                                               pesquisar = "Pesquisar")
+
+    #!!!Criar rotina para identificar erro de conexão de internet ou na execução do scraping                      
+    scraping_html <- httr::POST(url_tcm, body = parametros, encode = 'form')
+                    
+if (scraping_html$status_code != 200) {
+      
+      tabela_requisicoes[query$id, "situacao"] <- "erro"
+      print(paste("Erro na requisição de ID:", query$id))
+      Sys.sleep(30)
+      next
+
+} else {
+    
+    salvar_html <- xml2::read_html(scraping_html) %>%
+                   rvest::html_node("#texto") %>%
+                   write_html(file.path(subdir_resposta_scraping_html,
+                                        paste0("resp_", query$ano, "-",
+                                               query$mes,"-PESSOAL-",
+                                               query$nm_municipio, "-",
+                                               query$cod_entidade, "-",
+                                               gsub("/", "", query$nm_entidade),".html")))
+}
+
+detectar_tabela <- xml2::read_html(scraping_html) %>%
+                   rvest::html_node("#tabelaResultado") %>%
+                   is.na()
+    
+
+if (detectar_tabela == FALSE) {
+    
+tabela_gravar_requisicoes[query$id, "situacao"] <- "OK"
+
+    } else {
+
+tabela_gravar_requisicoes[query$id, "situacao"] <- "nao informado"
+
+}
+
+tabela_gravar_requisicoes[query$id, "nome_arquivo_resposta"] <- paste0("resp_", query$ano, "-", query$mes, "-PESSOAL-",
+                                                                query$nm_municipio, "-", query$cod_entidade, "-", query$nm_entidade, ".html")
+
+readr::write_delim(tabela_gravar_requisicoes, file.path(subdir_parametros, "tabela_requisicoes.csv"), delim = ";")
+
+progresso <- paste0("Scraping - (ID: ", query$id, ") | ", i, " de ", nrow, " requisições ", "- ", round((i/nrow)*100),"%") %>%
+             print()
+
+#!!!Criar uma rotina para gerar um log com: erro de conexão, hora de início; hora de fim, requisições "OK";
+#requisições com "erro""; requisicoes com "nao informado"; e Total de requisicoes
+
+}
+
+}
+}
+
+#Executa a função acima
+iniciar_scraping_tcm_folhadepesssoal_html () 
+
+```
+
+
+Tratamento dos Dados:
+7 - Data Wrangling (tratamento) dos dados obtidos via Web Scraping do site do TCM-Ba;
+
+```{r wrangling_tcm_folhadepesssoal_html, eval=FALSE}
+
+wrangling_tcm_folhadepesssoal_html <- function() {
+
+
+tabela_scraping_html <- readr::read_delim(file.path(subdir_parametros, "tabela_requisicoes.csv"), delim =";") %>%
+                        dplyr::filter(situacao == "OK", is.na(tratado))
+                        
+tabela_tratados <- readr::read_delim(file.path(subdir_parametros, "tabela_requisicoes.csv"), delim = ";")
+
+
+nrow <- nrow(tabela_scraping_html)  
+i <- tabela_scraping_html$id
+
+
+      loop_wrangling <- for(i in 1:nrow) {
+  
+                  query <- tabela_scraping_html[i, ]
+                  
+                  wrangling_html <- xml2::read_html(file.path(subdir_resposta_scraping_html,
+                                                    paste0(gsub("/","",query$nome_arquivo_resposta))),
+                                                    encoding = "UTF-8") %>%
+                                    rvest::html_node("#tabelaResultado") %>%
+                                    rvest::html_table(fill = TRUE) %>%
+                                    janitor::clean_names() %>%
+                                    dplyr::select(-na) %>%
+                                    purrr::map_dfr(stringr::str_to_upper) %>%
+                                    magrittr::set_names(c("nome",
+                                                          "matricula",
+                                                          "tipo_servidor",
+                                                          "cargo",
+                                                          "salario_base",
+                                                          "salaraio_vantagens",
+                                                          "salario_gratificacao"))
+                  
+                  ultima_linha <- nrow(wrangling_html)
+                  
+                  wrangling_html_final <- wrangling_html[-ultima_linha, ]
+                  
+
+                  gravar_csv <- wrangling_html_final %>%
+                                dplyr::mutate(data = query$data,
+                                              ano = query$ano,
+                                              mes = query$mes,
+                                              cod_municipio = query$cod_municipio,
+                                              nm_municipio = query$nm_municipio,
+                                              cod_entidade = query$cod_entidade,
+                                              nm_entidade = query$nm_entidade) %>%
+                                dplyr::select(data, ano, mes, cod_municipio, nm_municipio,
+                                              cod_entidade, nm_entidade, nome, matricula,
+                                              tipo_servidor, cargo, salario_base,
+                                              salaraio_vantagens, salario_gratificacao) %>%
+                                write.csv2(file.path(subdir_arquivos_tratados_csv,
+                                                     paste0(query$ano, "-", query$mes,"-PESSOAL-",
+                                                            query$nm_municipio,"-", query$cod_entidade,"-",
+                                                            gsub("/", "", query$nm_entidade), ".csv")),
+                                           quote = FALSE,
+                                           row.names = FALSE,
+                                           fileEncoding = "ASCII//TRANSLIT")
+                                         #!!!Verificar poss?vel problemas com o tamanho do nome do arquivo
+                                 
+#!!!Criar rotina IF para tratar possíveis erros durante o tratamento
+tabela_tratados[query$id, "tratado"] <- "SIM"
+
+
+tabela_tratados[query$id, "nome_arquivo_tratado"] <- paste0(query$ano, "-", query$mes, "-PESSOAL-",
+                                                            query$nm_municipio, "-", query$cod_entidade,
+                                                            "-", query$nm_entidade, ".csv")
+
+readr::write_delim(tabela_tratados, file.path(subdir_parametros, "tabela_requisicoes.csv"), delim = ";")
+
+
+
+progresso <- paste0("Arquivo Tratado - (ID: ", query$id, ") | ", i, " de ", nrow,
+                    " arquivos ", "- ", round((i/nrow)*100),"%") %>%
+             print()                  
+
+}
+
+}
+
+#Executa a função acima
+wrangling_tcm_folhadepesssoal_html()
+
+```
+
+
+Disponibilizar os dados:
+8 - API disponibilizar os dados via consulta GET;
+
+```{r}
+
+#Ainda não desenvolvido
+
+```
+
+
+9 - Exportar dados para o Banco de Dados do CKAN;
+
+```{r}
+
+#Ainda não desenvolvido
+
+```
+
+
+Automatizar a execução do Scraping:
+10 - Timer para disparar o Web Scraping em diárias e horários determinados;
+```{r}
+
+#Ainda não desenvolvido
+
+```
+
+**Futuras Implementações:**
+!!!Implementar correção para possíveis erros em virtude de nome de arquivos grandes
+!!!Implementar conexão com o SQLite, para armazenar os dados salvos em CSV
+!!!Criar uma função para gerar log
+
+!!!Verificar se a Tabela Requisições está sendo atualizada sem bug ou erros de lógica
+
+!!!Fazer as requisiçõeses em ordem decrescente
+
+!!!Analisar a possibilidade de trocar o CSV por RDS, quando for armazenar temporariamente os data.frame
+
+------------------------------------------------------
+ERROS:
+
+!!!Tratar erro no qual o scraping fica parado esperando a resquisi??o. E bot?o Stop ativado...
+
+----------------
+
+Error in curl::curl_fetch_memory(url, handle = handle) : 
+Recv failure: Connection was reset 
+----------------
+
+Error: 'resposta_scraping_html/resp_2017-9-PESSOAL-CAMACARI-955-DESENVOLVIMENTO DE CAMA?ARI S' does not exist in current working directory ('C:/Users/georg/OneDrive/03 - Controle Social/Web Scraping/TCM_Municipios_FolhaPesssoal').
+
+----------------
+Error in node_write_file(x$node, file, options = options, encoding = encoding) : 
+  Error closing file
+In addition: Warning message:
+  In node_write_file(x$node, file, options = options, encoding = encoding) :
+  No such file or director [1524]
