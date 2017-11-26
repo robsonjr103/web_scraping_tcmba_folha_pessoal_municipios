@@ -14,7 +14,7 @@ O presente Web Scraping tem o objetivo de obter os dados da Folha de Pessoal dos
 
 O código do *Web Scraping - Folha de Pessoal dos Municípios da Bahia via TCM-Ba* apesar de estar operacional, ainda faltam implementações (as quais serão mais detalhadas abaixo), bem como aperfeiçoar os códigos inicialmente utilizados; transferir as estratégias de armazenamento inicialmente adotadas (arquivos CSV) para um Sistema de Gestão de Banco de Dados (SGBD), a exemplo do SQLite; adotar estratégias mais eficientes na fase de tratamento de dados (Data Wrangling), tornando essa etapa mais rápida; e implantar um sistema de tratamento de erros durante a execução do Web Scraping.
 
-O código foi desenvolvido para ambiente **Windows 10**, com a versão *3.4.2* do R, mas futuramente será implementado para **Linux** também.
+O código foi desenvolvido para ambiente **Windows 10**, com a versão *3.4.2* do R. Apesar do código ter sido desenvolvido para funcionar em **Linux**, ainda não foram realizados testes.
 
 
 ## Etapas e Estratégias do Web Scraping
@@ -568,17 +568,18 @@ ERROS:
 
 !!!Tratar erro no qual o scraping fica parado esperando a resquisi??o. E bot?o Stop ativado...
 
-----------------
 
-Error in curl::curl_fetch_memory(url, handle = handle) : 
-Recv failure: Connection was reset 
-----------------
 
-Error: 'resposta_scraping_html/resp_2017-9-PESSOAL-CAMACARI-955-DESENVOLVIMENTO DE CAMA?ARI S' does not exist in current working directory ('C:/Users/georg/OneDrive/03 - Controle Social/Web Scraping/TCM_Municipios_FolhaPesssoal').
+!Error in curl::curl_fetch_memory(url, handle = handle) : 
+!Recv failure: Connection was reset
+
+
+
+!Error: 'resposta_scraping_html/resp_2017-9-PESSOAL-CAMACARI-955-DESENVOLVIMENTO DE CAMA?ARI S' does not exist in current working directory !('C:/Users/georg/OneDrive/03 - Controle Social/Web Scraping/TCM_Municipios_FolhaPesssoal').
 
 ----------------
-Error in node_write_file(x$node, file, options = options, encoding = encoding) : 
-  Error closing file
-In addition: Warning message:
-  In node_write_file(x$node, file, options = options, encoding = encoding) :
-  No such file or director [1524]
+!Error in node_write_file(x$node, file, options = options, encoding = encoding) : 
+  !Error closing file
+!In addition: Warning message:
+  !In node_write_file(x$node, file, options = options, encoding = encoding) :
+  !No such file or director [1524]
